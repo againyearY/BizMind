@@ -57,7 +57,7 @@ pub struct Usage {
 }
 
 /// FEAT-LLM-001: 文本模型调用 - 实体提取和分类
-/// 超时时间: 8秒
+/// 超时时间: 30秒 (ModelScope API 响应较慢，需要较长超时)
 pub async fn call_llm_text(
     config: &LLMConfig,
     request: &LLMTextRequest,
@@ -65,6 +65,8 @@ pub async fn call_llm_text(
     if config.api_key.is_empty() {
         return Err("API Key未配置".to_string());
     }
+
+    eprintln!("[LLM Rust] 🔄 开始调用 LLM (模型: {}, 端点: {})", config.model, config.base_url);
 
     let client = reqwest::Client::new();
     let endpoint = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
@@ -92,13 +94,18 @@ pub async fn call_llm_text(
         .json(&request_body)
         .send();
 
-    match timeout(Duration::from_secs(8), fut).await {
+    match timeout(Duration::from_secs(30), fut).await {
         Ok(Ok(response)) => {
+            let status = response.status();
+            eprintln!("[LLM Rust] 📨 收到响应: HTTP {}", status);
+            
             match response.json::<OpenAIResponse>().await {
                 Ok(resp) => {
                     if resp.choices.is_empty() {
+                        eprintln!("[LLM Rust] ❌ LLM返回空响应");
                         return Err("LLM返回空响应".to_string());
                     }
+                    eprintln!("[LLM Rust] ✅ 成功: {} tokens", resp.usage.total_tokens);
                     Ok(LLMTextResponse {
                         content: resp.choices[0].message.content.clone(),
                         usage: TokenUsage {
@@ -108,11 +115,20 @@ pub async fn call_llm_text(
                         },
                     })
                 }
-                Err(e) => Err(format!("JSON解析失败: {}", e)),
+                Err(e) => {
+                    eprintln!("[LLM Rust] ❌ JSON解析失败: {}", e);
+                    Err(format!("JSON解析失败: {}", e))
+                }
             }
         }
-        Ok(Err(e)) => Err(format!("API调用失败: {}", e)),
-        Err(_) => Err("LLM调用超时(>8秒)".to_string()),
+        Ok(Err(e)) => {
+            eprintln!("[LLM Rust] ❌ API调用失败: {}", e);
+            Err(format!("API调用失败: {}", e))
+        }
+        Err(_) => {
+            eprintln!("[LLM Rust] ❌ LLM调用超时(>30秒) - 可能是网络问题或 API 响应过慢");
+            Err("LLM调用超时(>30秒) - 请检查网络连接或稍后重试".to_string())
+        }
     }
 }
 

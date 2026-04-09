@@ -29,3 +29,22 @@ CREATE TABLE IF NOT EXISTS app_config (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- FEAT-API-002: LLM 配置表
+CREATE TABLE IF NOT EXISTS llm_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  api_key TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  model TEXT NOT NULL,
+  vision_model TEXT DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+
+-- FEAT-DB-003: Token 使用追踪表
+CREATE TABLE IF NOT EXISTS token_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE(date)
+);

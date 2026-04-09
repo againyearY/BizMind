@@ -51,7 +51,7 @@ pub struct Message {
     pub updated_at: String,
 }
 
-pub async fn save_message(db_state: &DbState, message: Message) -> Result<(), String> {
+pub fn save_message(db_state: &DbState, message: Message) -> Result<(), String> {
     let conn = Connection::open(&db_state.path).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let id = if message.id.trim().is_empty() {
@@ -240,20 +240,29 @@ pub fn get_llm_config(db_state: &DbState) -> Result<Option<crate::llm::LLMConfig
         .query_row(["llm_api_key"], |row| row.get::<_, String>(0))
         .ok();
 
+    // [后门] 如果数据库中没有配置，使用硬编码的默认值（测试用，正式版删除）
     if api_key.is_none() {
+        if std::env::var("USE_DEFAULT_LLM").unwrap_or_else(|_| "1".to_string()) == "1" {
+            return Ok(Some(crate::llm::LLMConfig {
+                api_key: "ms-85b8c78f-d170-4cde-a025-aacd388e8691".to_string(),
+                base_url: "https://api-inference.modelscope.cn/v1".to_string(),
+                model: "Qwen/Qwen3.5-35B-A3B".to_string(),
+                vision_model: "Qwen/Qwen3.5-35B-A3B".to_string(),
+            }));
+        }
         return Ok(None);
     }
 
     config.api_key = api_key.unwrap();
     config.base_url = stmt
         .query_row(["llm_base_url"], |row| row.get::<_, String>(0))
-        .unwrap_or_else(|_| "https://api.deepseek.com".to_string());
+        .unwrap_or_else(|_| "https://api-inference.modelscope.cn/v1".to_string());
     config.model = stmt
         .query_row(["llm_model"], |row| row.get::<_, String>(0))
-        .unwrap_or_else(|_| "deepseek-chat".to_string());
+        .unwrap_or_else(|_| "Qwen/Qwen3.5-35B-A3B".to_string());
     config.vision_model = stmt
         .query_row(["llm_vision_model"], |row| row.get::<_, String>(0))
-        .unwrap_or_else(|_| String::new());
+        .unwrap_or_else(|_| "Qwen/Qwen3.5-35B-A3B".to_string());
 
     Ok(Some(config))
 }
@@ -363,7 +372,7 @@ pub fn search_messages(db_state: &DbState, query: &str, limit: i32) -> Result<Ve
 }
 
 // FEAT-006: 更新消息
-pub fn update_message(db_state: &DbState, message: &Message) -> Result<(), String> {
+pub fn update_message(db_state: &DbState, id: &str, updates: &Message) -> Result<(), String> {
     let conn = Connection::open(&db_state.path).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -385,17 +394,17 @@ pub fn update_message(db_state: &DbState, message: &Message) -> Result<(), Strin
     conn.execute(
         sql,
         rusqlite::params![
-            &message.content_summary,
-            &message.category,
-            option_string_to_value(message.customer_name.clone()),
-            option_string_to_value(message.project_name.clone()),
-            option_f64_to_value(message.amount),
-            option_string_to_value(message.extracted_date.clone()),
-            if message.is_urgent { 1 } else { 0 },
-            &message.status,
-            if message.user_corrected { 1 } else { 0 },
+            &updates.content_summary,
+            &updates.category,
+            option_string_to_value(updates.customer_name.clone()),
+            option_string_to_value(updates.project_name.clone()),
+            option_f64_to_value(updates.amount),
+            option_string_to_value(updates.extracted_date.clone()),
+            if updates.is_urgent { 1 } else { 0 },
+            &updates.status,
+            if updates.user_corrected { 1 } else { 0 },
             now,
-            &message.id
+            id
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -404,11 +413,67 @@ pub fn update_message(db_state: &DbState, message: &Message) -> Result<(), Strin
 }
 
 // FEAT-006: 删除消息
-pub fn delete_message(db_state: &DbState, message_id: &str) -> Result<(), String> {
-    let conn = Connection::open(&db_state.path).map_err(|e| e.to_string())?;
+pub fn delete_message(db_state: &DbState, id: &str) -> Result<(), String> {
+    eprintln!("[DB] 🗑️ 开始删除消息: {}", id);
+    
+    let conn = Connection::open(&db_state.path).map_err(|e| {
+        let msg = format!("数据库连接失败: {}", e);
+        eprintln!("[DB] ❌ {}", msg);
+        msg
+    })?;
 
-    conn.execute("DELETE FROM messages WHERE id = ?1", [message_id])
-        .map_err(|e| e.to_string())?;
+    let rows_affected = conn.execute("DELETE FROM messages WHERE id = ?1", [id])
+        .map_err(|e| {
+            let msg = format!("DELETE 执行失败: {}", e);
+            eprintln!("[DB] ❌ {}", msg);
+            msg
+        })?;
+
+    if rows_affected == 0 {
+        let msg = format!("消息不存在，无法删除 (ID: {})", id);
+        eprintln!("[DB] ❌ {}", msg);
+        return Err(msg);
+    }
+
+    eprintln!("[DB] ✅ 消息已删除: {} (受影响行数: {})", id, rows_affected);
+    Ok(())
+}
+
+// FEAT-LLM-002: 保存LLM配置
+pub fn save_llm_config(
+    db_state: &DbState,
+    api_key: String,
+    base_url: String,
+    model: String,
+    vision_model: String,
+) -> Result<(), String> {
+    let conn = Connection::open(&db_state.path).map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().to_rfc3339();
+
+    // 保存或更新API Key和相关配置
+    conn.execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+        ["llm_api_key", &api_key, &now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+        ["llm_base_url", &base_url, &now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+        ["llm_model", &model, &now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+        ["llm_vision_model", &vision_model, &now],
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(())
 }

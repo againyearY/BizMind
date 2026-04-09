@@ -15,9 +15,10 @@ const MAX_CONTENT_LENGTH = 10000;
 
 interface InputWindowProps {
   onClose: () => void;
+  onSaveSuccess?: () => void;
 }
 
-export const InputWindow = ({ onClose }: InputWindowProps) => {
+export const InputWindow = ({ onClose, onSaveSuccess }: InputWindowProps) => {
   const [sourceChannel, setSourceChannel] = useState<SourceChannel>("other");
   const [contentRaw, setContentRaw] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -84,10 +85,15 @@ export const InputWindow = ({ onClose }: InputWindowProps) => {
 
       // 保存到数据库
       await saveMessage(message);
+      console.log("[InputWindow] ✅ 消息保存成功:", message.id, "类别:", message.category, "状态:", message.status);
       setContentRaw("");
       setSuccess();
+      
+      // 触发看板刷新
+      onSaveSuccess?.();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "归档失败，请稍后重试";
+      console.error("[InputWindow] ❌ 归档失败:", errorMsg, error);
       setError(errorMsg);
     }
   };
@@ -97,29 +103,45 @@ export const InputWindow = ({ onClose }: InputWindowProps) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md transition-all duration-300"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
     >
-      <div className="w-[680px] rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">快速归档</h2>
-          <span className="text-xs text-slate-500">Ctrl+Shift+A</span>
+      <div className="w-[680px] rounded-lg bg-white p-6 border-2 border-slate-300 shadow-[0_24px_64px_rgba(15,23,42,0.35)] opacity-100">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-bold text-foreground">快速归档</h2>
+            <p className="text-sm text-text-muted mt-1">粘贴内容，AI自动分类</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-text-muted bg-bg-secondary px-2 py-1 rounded">Ctrl+Shift+A</span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-text-muted hover:text-foreground transition p-1 hover:bg-bg-secondary rounded"
+              aria-label="关闭"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div className="mt-4 flex gap-2">
+        <div className="flex gap-2 mb-4">
           {SOURCE_OPTIONS.map((option) => (
             <button
               key={option.value}
               type="button"
               onClick={() => setSourceChannel(option.value)}
-              className={`rounded-full px-4 py-1 text-sm transition ${
+              className={`rounded-lg px-4 py-2 text-sm transition font-medium ${
                 sourceChannel === option.value
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-primary text-white shadow-md"
+                  : "bg-bg-secondary text-text-secondary hover:bg-border hover:text-foreground"
               }`}
             >
               {option.label}
@@ -127,25 +149,34 @@ export const InputWindow = ({ onClose }: InputWindowProps) => {
           ))}
         </div>
 
-        <div className="mt-4">
+        <div className="mb-4">
           <textarea
             value={contentRaw}
             onChange={(event) => setContentRaw(event.target.value)}
             placeholder="粘贴微信/QQ/邮件内容，或手动输入..."
-            className="h-44 w-full resize-none rounded-xl border border-slate-200 p-4 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
+            className="h-40 w-full resize-none rounded-lg border border-border p-4 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/10 transition bg-surface"
           />
-          <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-            <span>{notice ?? errorMessage ?? ""}</span>
-            <span>{lengthHint}</span>
+          <div className="mt-2 flex items-center justify-between text-xs">
+            <span className={notice ? "text-warning" : errorMessage ? "text-danger" : "text-text-muted"}>
+              {notice ?? errorMessage ?? ""}
+            </span>
+            <span className="text-text-muted">{lengthHint}</span>
           </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-text-secondary hover:bg-bg-secondary transition"
+          >
+            取消
+          </button>
           <button
             type="button"
             onClick={() => handleSave(false)}
             disabled={isProcessing}
-            className="rounded-full bg-slate-900 px-5 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-lg bg-primary text-white px-5 py-2 text-sm font-medium hover:bg-primary-dark transition disabled:cursor-not-allowed disabled:bg-text-muted shadow-md hover:shadow-lg"
           >
             {isProcessing ? "归档中..." : "归档"}
           </button>
@@ -153,9 +184,9 @@ export const InputWindow = ({ onClose }: InputWindowProps) => {
             type="button"
             onClick={() => handleSave(true)}
             disabled={isProcessing}
-            className="rounded-full border border-rose-200 px-5 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-300 hover:text-rose-700 disabled:cursor-not-allowed"
+            className="rounded-lg border-2 border-danger text-danger px-5 py-2 text-sm font-medium hover:bg-danger/5 transition disabled:cursor-not-allowed disabled:border-text-muted disabled:text-text-muted"
           >
-            归档并标记紧急
+            🔴 标记紧急
           </button>
         </div>
       </div>

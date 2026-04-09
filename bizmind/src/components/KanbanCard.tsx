@@ -31,10 +31,17 @@ const formatRelativeTime = (dateString: string): string => {
 
 // 状态点颜色
 const statusDotColors: Record<string, string> = {
-  processed: "bg-emerald-500",
-  unprocessed: "bg-amber-500",
+  processed: "bg-green-500",
+  unprocessed: "bg-yellow-500",
   archived: "bg-slate-400",
 };
+
+const Tag = ({ icon, text, colorClass }: { icon: string; text: string; colorClass: string }) => (
+  <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${colorClass}`}>
+    <span className="mr-1">{icon}</span>
+    {text}
+  </div>
+);
 
 export const KanbanCard = ({ message, onClickCard }: KanbanCardProps) => {
   const statusDotStyle = useMemo(
@@ -42,52 +49,52 @@ export const KanbanCard = ({ message, onClickCard }: KanbanCardProps) => {
     [message.status]
   );
 
-  const urgencyBorder = message.is_urgent ? "border-l-4 border-l-rose-500" : "";
+  const urgencyBorder = message.is_urgent ? "border-l-4 border-destructive" : "border-l-4 border-transparent";
 
   return (
     <div
       onClick={() => onClickCard(message)}
-      className={`group cursor-pointer rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:shadow-md ${urgencyBorder}`}
+      className={`group cursor-pointer rounded-lg border border-border bg-card p-3 shadow-sm hover:shadow-md hover:border-primary/50 transition-all ${urgencyBorder}`}
     >
-      {/* 头部：icon + 相对时间 */}
-      <div className="flex items-start justify-between">
+      {/* Header: Icon + Relative Time */}
+      <div className="flex items-start justify-between mb-2">
         <span className="text-lg">{sourceChannelIcons[message.source_channel] || sourceChannelIcons.other}</span>
-        <span className="text-xs text-slate-500">{formatRelativeTime(message.created_at)}</span>
+        <span className="text-xs text-text-muted">{formatRelativeTime(message.created_at)}</span>
       </div>
 
-      {/* 摘要文本 */}
-      <div className="mt-2">
-        <p className="line-clamp-2 text-sm text-slate-900">
-          {message.content_summary || message.content_raw.slice(0, 60)}
+      {/* Summary Text */}
+      <div className="mb-3">
+        <p className="line-clamp-2 text-sm font-medium text-foreground">
+          {message.content_summary || message.content_raw.slice(0, 80)}
         </p>
       </div>
 
-      {/* 标签：客户/项目/金额 */}
-      <div className="mt-2 flex flex-wrap gap-1">
+      {/* Tags: Customer/Project/Amount */}
+      <div className="flex flex-wrap gap-1 mb-3">
         {message.customer_name && (
-          <span className="inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-            👤 {message.customer_name}
-          </span>
+          <Tag icon="👤" text={message.customer_name} colorClass="bg-secondary/10 text-secondary" />
         )}
         {message.project_name && (
-          <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">
-            📦 {message.project_name}
-          </span>
+          <Tag icon="📦" text={message.project_name} colorClass="bg-primary/10 text-primary" />
         )}
         {message.amount && (
-          <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
-            💰 ¥{message.amount.toLocaleString()}
-          </span>
+          <Tag icon="💰" text={`¥${message.amount.toLocaleString()}`} colorClass="bg-success/10 text-success" />
         )}
       </div>
 
-      {/* 底部：状态点 + AI置信度 */}
-      <div className="mt-2 flex items-center justify-between">
-        <div className={`h-2 w-2 rounded-full ${statusDotStyle}`} />
+      {/* Footer: Status Dot + AI Confidence */}
+      <div className="flex items-center justify-between pt-2 border-t border-border/50">
+        <div className="flex items-center gap-1.5">
+          <div className={`h-2 w-2 rounded-full ${statusDotStyle}`} />
+          <span className="text-xs text-text-muted capitalize">{message.status}</span>
+        </div>
         {message.ai_confidence > 0 && (
-          <span className="text-xs text-slate-500">
-            AI {'⭐'.repeat(Math.ceil(message.ai_confidence * 5))} {(message.ai_confidence * 100).toFixed(0)}%
-          </span>
+          <div className="flex items-center gap-1" title={`AI置信度: ${(message.ai_confidence * 100).toFixed(0)}%`}>
+            <div className="w-12 bg-border rounded-full h-1">
+              <div className="bg-primary h-1 rounded-full" style={{ width: `${message.ai_confidence * 100}%` }}></div>
+            </div>
+            <span className="text-xs text-text-muted">{Math.round(message.ai_confidence * 100)}%</span>
+          </div>
         )}
       </div>
     </div>

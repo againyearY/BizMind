@@ -16,46 +16,66 @@ const STATUSES = ["unprocessed", "processed", "archived"];
 export const DetailPanel = ({ message, onClose, onMessageUpdated }: DetailPanelProps) => {
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState<Message | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const updateMessage = useMessageStore((state) => state.updateMessage);
   const deleteMessage = useMessageStore((state) => state.deleteMessage);
 
   useEffect(() => {
     setFormData(message);
+    setDeleteError(null);
   }, [message]);
 
   if (!message || !formData) return null;
 
   const handleSave = async () => {
     try {
+      console.log("[DetailPanel] 开始保存消息:", message.id);
       await invoke("update_message", { message: formData });
       updateMessage(formData);
+      console.log("[DetailPanel] ✅ 消息保存成功");
       setEditing(false);
       onMessageUpdated();
     } catch (error) {
-      console.error("Failed to update message:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error("[DetailPanel] ❌ 保存消息失败:", errorMsg, error);
+      alert("保存失败，请稍后重试");
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm("确定要删除这条消息吗？")) return;
+    if (!confirm("⚠️ 确定要删除这条消息吗？此操作不可撤销。")) return;
+
+    setDeleting(true);
+    setDeleteError(null);
 
     try {
-      await invoke("delete_message", { messageId: message.id });
-      deleteMessage(message.id);
-      onClose();
+      console.log("[DetailPanel] 开始删除消息:", message.id);
+      await invoke("delete_message", { id: message.id });
+      console.log("[DetailPanel] ✅ 消息删除成功");
+      deleteMessage(message.id, message.category as any);
       onMessageUpdated();
+      
+      // 延迟关闭，让用户看到成功提示
+      setTimeout(() => {
+        onClose();
+      }, 500);
     } catch (error) {
-      console.error("Failed to delete message:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error("[DetailPanel] ❌ 删除消息失败:", errorMsg, error);
+      setDeleteError("删除失败: " + errorMsg);
+    } finally {
+      setDeleting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/30 z-50 flex items-end">
-      {/* Overlay */}
-      <div className="absolute inset-0" onClick={onClose} />
-
-      {/* Panel */}
-      <div className="relative w-full sm:w-96 bg-white shadow-lg max-h-screen overflow-y-auto">
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-stretch justify-end backdrop-blur-md transition-all duration-300" onClick={onClose}>
+      {/* Slide-in Panel from Right */}
+      <div
+        className="w-full sm:w-[440px] bg-white max-h-screen overflow-y-auto border-l-2 border-slate-300 shadow-[-24px_0_64px_rgba(15,23,42,0.28)] opacity-100"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex justify-between items-center">
           <h2 className="text-lg font-semibold">消息详情</h2>
@@ -241,11 +261,22 @@ export const DetailPanel = ({ message, onClose, onMessageUpdated }: DetailPanelP
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700"
+                  disabled={deleting}
+                  className={`flex-1 px-4 py-2 text-white rounded text-sm font-medium transition ${
+                    deleting 
+                      ? "bg-gray-400 cursor-not-allowed" 
+                      : "bg-red-600 hover:bg-red-700"
+                  }`}
                 >
-                  删除
+                  {deleting ? "删除中..." : "删除"}
                 </button>
               </div>
+
+              {deleteError && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                  {deleteError}
+                </div>
+              )}
             </>
           )}
         </div>

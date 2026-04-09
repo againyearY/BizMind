@@ -54,24 +54,38 @@ export const extractEntityFromText = async (
       throw new Error("内容不能为空");
     }
 
+    console.log("[LLM] 开始调用文本提取，来源:", sourceChannel, "内容长度:", contentRaw.length);
+
     const { systemPrompt, userMessage } = buildEntityExtractionPrompt(sourceChannel, contentRaw);
 
-    const response = await invoke<{ content: string }>("call_llm_text", {
-      system_prompt: systemPrompt,
-      user_message: userMessage,
-    });
+    console.log("[LLM] 🔄 准备调用 call_llm_text 命令...");
+    let response: { content: string };
+    try {
+      response = await invoke<{ content: string }>("call_llm_text", {
+        systemPrompt,
+        userMessage,
+      });
+      console.log("[LLM] ✅ invoke 调用成功, 响应长度:", response.content.length);
+    } catch (invokeError) {
+      const invokeMsg = invokeError instanceof Error ? invokeError.message : String(invokeError);
+      console.error("[LLM] ❌ invoke 失败:", invokeMsg, invokeError);
+      throw invokeError;
+    }
 
     // 解析JSON响应
     try {
+      console.log("[LLM] 解析 JSON..., 前 200 字:", response.content.slice(0, 200));
       const result = JSON.parse(response.content) as LLMExtractionResult;
+      console.log("[LLM] ✅ 实体提取成功:", result);
       return result;
     } catch (e) {
-      console.error("LLM返回JSON解析失败:", e, response.content);
-      throw new Error("LLM返回格式错误");
+      const parseMsg = e instanceof Error ? e.message : String(e);
+      console.error("[LLM] ❌ JSON 解析失败:", parseMsg, "完整响应:", response.content);
+      throw new Error(`JSON 格式错误: ${parseMsg}`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("文本实体提取失败:", message);
+    console.error("[LLM] ❌ 文本实体提取彻底失败:", message, error);
     return null; // 降级返回null，前端会使用默认值
   }
 };
@@ -89,9 +103,9 @@ export const extractTextFromImage = async (
     const systemPrompt = buildOCRPrompt();
 
     const response = await invoke<{ content: string }>("call_llm_vision", {
-      system_prompt: systemPrompt,
-      image_base64: imageBase64,
-      image_media_type: imageMediaType,
+      systemPrompt,
+      imageBase64,
+      imageMediaType,
     });
 
     // 检查是否无法识别
